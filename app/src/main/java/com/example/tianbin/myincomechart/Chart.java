@@ -18,6 +18,7 @@ import android.os.Build;
 import android.support.annotation.Nullable;
 import android.text.TextPaint;
 import android.util.AttributeSet;
+import android.util.Log;
 import android.util.TypedValue;
 import android.view.MotionEvent;
 import android.view.View;
@@ -30,7 +31,7 @@ import java.util.List;
 
 /**
  * Created by TianBin on 2017/7/1 12:38.
- * Description :
+ * Description :仿金融APP收益曲线图
  */
 
 public class Chart extends View implements View.OnTouchListener {
@@ -129,7 +130,7 @@ public class Chart extends View implements View.OnTouchListener {
     /**
      * 坐标点集合
      */
-    private float[][] points=new float[xSize][2];
+    private float[][] points;
     /**
      * 选中的value
      */
@@ -152,6 +153,12 @@ public class Chart extends View implements View.OnTouchListener {
      * 填充区域随曲线一起运动
      */
     private boolean fillAreaHasAnim=true;
+
+    /**
+     * 横坐标跟point是否是一对一关系（point有几百个点，但坐标轴只取平均7个，曲线则全部绘制）
+     */
+    private boolean isOneToOne=true;
+    private String xLabels[]=new String[7];
 
     public Chart(Context context) {
         this(context,null);
@@ -239,6 +246,10 @@ public class Chart extends View implements View.OnTouchListener {
         }
         this.datas.clear();
         this.datas.addAll(datas);
+        points=new float[datas.size()][2];
+        if(datas.size()>xSize){
+            isOneToOne=false;
+        }
 
         //放大为整数，避免浮点运算
         min= (int) (datas.get(0).percent*100);
@@ -260,25 +271,45 @@ public class Chart extends View implements View.OnTouchListener {
             }
         }
 
+        //处理x轴坐标
+        int average= (int) Math.ceil(datas.size()/7f);
+        for (int i = 0; i < xLabels.length; i++) {
+            for (int j=average*i+1;j<datas.size();j++) {
+                if(j%average==0){
+                    xLabels[i]=datas.get(j).date;
+//                    Log.e(TAG, i+"setDatas: "+j );
+                    break;
+                }else{
+                    if(j==datas.size()-1){
+                        xLabels[i]=datas.get(j).date;
+                    }
+                }
+            }
+        }
+
 
         //转换比例，找出最大和最小进行换算每个梯度所占像素
         perPercent=(max-min)/(ySize-1);
 //        Log.e(TAG, "onDraw: "+perPercent+"@"+min+"#"+max );
-        perHeight=getHeight()/(ySize+1);
+        perHeight=(getHeight()-getPaddingTop()-getPaddingBottom())/(ySize+1);
 
         //坐标右对齐========Y轴处理
-        String str=negativePos==-1?datas.get(0).percent+"%":datas.get(negativePos).percent+"%";
+        String str=negativePos==-1?datas.get(datas.size()-1).percent+"%":datas.get(negativePos).percent+"%";
         xVertical=getPaddingLeft()+labelYPaint.measureText(str);
         xPadding= TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP,10,getResources().getDisplayMetrics());
 
         //X轴处理和曲线绘制,居中对齐
         eachWidth=(getWidth()-getPaddingRight()-xVertical-xPadding)/xSize;
-        bottomY=getHeight()-perHeight-labelYHeight/3f;//最低点坐标
-        topY=perHeight-labelYHeight/3f;//最高点坐标
+        bottomY=getHeight()-getPaddingBottom()-perHeight-labelYHeight/3f;//最低点坐标
+        topY=perHeight+getPaddingTop()-labelYHeight/3f;//最高点坐标
         perY=(bottomY-topY)/((max-min)/100f);//每个刻度所占坐标像素
 
+        float eachWidthTemp=eachWidth*xSize/datas.size();
         for (int i = 0; i < datas.size(); i++) {
             float x=i*eachWidth+xPadding+xVertical+eachWidth/2f;
+            if(!isOneToOne){
+                x=i*eachWidthTemp+xPadding+xVertical;
+            }
             float y=bottomY-perY*(datas.get(i).percent-min/100f);
 //            Log.e(TAG, "onDraw: "+y+"#"+perY+"$"+bottomY+"$"+topY );
 
@@ -360,22 +391,28 @@ public class Chart extends View implements View.OnTouchListener {
             if(i==ySize-1){
                 label=df.format(max/100f)+"%";
             }
-            float y=perHeight*(ySize-i);
+//            float y=getPaddingTop()+perHeight*(ySize-i)-getPaddingBottom();
+            float y=bottomY-perHeight*i;
 //            Log.e(TAG, "onDraw: "+y+"#"+label );
             //绘制y坐标轴
             canvas.drawText(label,xVertical,y,labelYPaint);
             //绘制横向分割线
-            canvas.drawLine(xVertical+xPadding,y-labelYHeight/3,getWidth()-getPaddingRight(),y-labelYHeight/3,xSeparatePaint);
+            canvas.drawLine(xVertical+xPadding,y,getWidth()-getPaddingRight(),y,xSeparatePaint);
         }
 
-        for (int i = 0; i < datas.size(); i++) {
-            String label=datas.get(i).date;
+        for (int i = 0; i < xSize; i++) {
+            String label="";
+            if(isOneToOne){
+                label=datas.get(i).date;
+            }else{
+                label=xLabels[i];
+            }
             float x=i*eachWidth+xPadding+xVertical+eachWidth/2f;
-            float y=bottomY-perY*(datas.get(i).percent-min/100f);
+//            float y=bottomY-perY*(datas.get(i).percent-min/100f);
 //            Log.e(TAG, "onDraw: "+y+"#"+perY+"$"+bottomY+"$"+topY );
 
             //绘制x坐标轴
-            canvas.drawText(label,x,getHeight()-labelXHeight*1.8f,labelXPaint);
+            canvas.drawText(label,x,getHeight()-getPaddingBottom()-labelXHeight*1.8f,labelXPaint);
         }
         //绘制曲线图
         if(playAnim){
@@ -410,7 +447,7 @@ public class Chart extends View implements View.OnTouchListener {
             float lastX=points[datas.size()-1][0];
             float lastY=points[datas.size()-1][1];
             canvas.drawBitmap(bg,lastX-bg.getWidth(),lastY-bg.getHeight(),new Paint());
-            String tip=datas.get(datas.size()-1).percent+"%";
+            String tip=df.format(datas.get(datas.size()-1).percent)+"%";
             canvas.drawText(tip,lastX-labelValuePaint.measureText(tip)/2f,lastY-labelValueHeight/2f,labelValuePaint);
 
             float pointRadius= TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP,3,getResources().getDisplayMetrics());
@@ -448,7 +485,7 @@ public class Chart extends View implements View.OnTouchListener {
     public boolean onTouch(View v, MotionEvent event) {
         if(datas!=null&&datas.size()>0){
             if(isInArea(event.getX(),event.getY())){
-                Toast.makeText(getContext(),selectedValue.percent+"%", Toast.LENGTH_SHORT).show();
+                Toast.makeText(getContext(),df.format(selectedValue.percent)+"%", Toast.LENGTH_SHORT).show();
             }
         }
         return false;
